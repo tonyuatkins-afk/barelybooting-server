@@ -19,7 +19,12 @@ from flask import current_app, g
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS submissions (
     id                  TEXT PRIMARY KEY,
-    received_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- received_at is plain TEXT holding SQLite's CURRENT_TIMESTAMP
+    -- output (e.g. '2026-04-21 14:32:11'). Stored and compared as a
+    -- string; ISO-ish format sorts correctly lexicographically. We
+    -- deliberately avoid the DECLTYPE=TIMESTAMP route because Python
+    -- 3.12 deprecated the default datetime converter.
+    received_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     -- Identity
     hardware_signature  TEXT NOT NULL,
@@ -82,10 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_submissions_cpu_class
 def get_db() -> sqlite3.Connection:
     """Per-request connection, cached on Flask's ``g`` proxy."""
     if "db" not in g:
-        g.db = sqlite3.connect(
-            current_app.config["DATABASE"],
-            detect_types=sqlite3.PARSE_DECLTYPES,
-        )
+        g.db = sqlite3.connect(current_app.config["DATABASE"])
         g.db.row_factory = sqlite3.Row
         # Better write perf without sacrificing durability for our load.
         g.db.execute("PRAGMA journal_mode = WAL;")
@@ -103,7 +105,7 @@ def close_db(_exc: BaseException | None = None) -> None:
 def standalone_db(path: str | Path):
     """Connection outside the Flask request context — used by CLI
     commands (init-db, seed) and tests that don't spin up an app."""
-    conn = sqlite3.connect(str(path), detect_types=sqlite3.PARSE_DECLTYPES)
+    conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA foreign_keys = ON;")

@@ -44,6 +44,15 @@ def _new_submission_id() -> str:
     return secrets.token_hex(4)
 
 
+def _rate_limit_spec() -> str:
+    """Read the submit endpoint's rate-limit spec from config at decoration
+    time. Evaluated lazily via Flask-Limiter's callable support so operators
+    can tune without a code edit."""
+    return current_app.config.get(
+        "RATELIMIT_SUBMIT", "30 per hour; 5 per minute"
+    )
+
+
 @bp.route("/health", methods=["GET"])
 @limiter.exempt
 def health():
@@ -51,7 +60,7 @@ def health():
 
 
 @bp.route("/submit", methods=["POST"])
-@limiter.limit("30 per hour; 5 per minute")
+@limiter.limit(_rate_limit_spec)
 def submit():
     """Accept a CERBERUS.INI upload. See the contract doc for details.
 
@@ -113,6 +122,42 @@ def submit():
     return Response(body, mimetype="text/plain", status=200)
 
 
+# Column order for the submissions INSERT. Derived once here so the SQL
+# and the bind tuple cannot drift. Adding a column means one line here
+# plus the matching attribute on ParsedIni.
+_SUBMIT_COLUMNS = (
+    "id",
+    "hardware_signature",
+    "run_signature",
+    "ini_raw",
+    "ini_format",
+    "client_version",
+    "nickname",
+    "notes",
+    "cpu_class",
+    "cpu_detected",
+    "fpu_detected",
+    "memory_conv_kb",
+    "memory_ext_kb",
+    "cache_present",
+    "bus_class",
+    "video_adapter",
+    "video_chipset",
+    "audio_detected",
+    "bios_family",
+    "dhrystones",
+    "whetstone_kwips",
+    "mem_write_kbps",
+    "mem_read_kbps",
+    "mem_copy_kbps",
+    "emulator",
+)
+_SUBMIT_SQL = (
+    f"INSERT INTO submissions ({', '.join(_SUBMIT_COLUMNS)}) "
+    f"VALUES ({', '.join(['?'] * len(_SUBMIT_COLUMNS))})"
+)
+
+
 def _insert_with_retry(db, parsed):
     """INSERT the parsed row, regenerating submission_id on PK collision.
     Returns (submission_id, None) on success, (None, Response) on fatal
@@ -120,65 +165,11 @@ def _insert_with_retry(db, parsed):
     submission_id collisions just retry."""
     for _ in range(ID_RETRY_LIMIT):
         submission_id = _new_submission_id()
+        values = (submission_id,) + tuple(
+            getattr(parsed, col) for col in _SUBMIT_COLUMNS[1:]
+        )
         try:
-            db.execute(
-                """
-                INSERT INTO submissions (
-                    id, hardware_signature, run_signature,
-                    ini_raw, ini_format, client_version,
-                    nickname, notes,
-                    cpu_class, cpu_detected,
-                    fpu_detected,
-                    memory_conv_kb, memory_ext_kb,
-                    cache_present, bus_class,
-                    video_adapter, video_chipset,
-                    audio_detected,
-                    bios_family,
-                    dhrystones, whetstone_kwips,
-                    mem_write_kbps, mem_read_kbps, mem_copy_kbps,
-                    emulator
-                ) VALUES (?, ?, ?,
-                         ?, ?, ?,
-                         ?, ?,
-                         ?, ?,
-                         ?,
-                         ?, ?,
-                         ?, ?,
-                         ?, ?,
-                         ?,
-                         ?,
-                         ?, ?,
-                         ?, ?, ?,
-                         ?)
-                """,
-                (
-                    submission_id,
-                    parsed.hardware_signature,
-                    parsed.run_signature,
-                    parsed.ini_raw,
-                    parsed.ini_format,
-                    parsed.client_version,
-                    parsed.nickname,
-                    parsed.notes,
-                    parsed.cpu_class,
-                    parsed.cpu_detected,
-                    parsed.fpu_detected,
-                    parsed.memory_conv_kb,
-                    parsed.memory_ext_kb,
-                    parsed.cache_present,
-                    parsed.bus_class,
-                    parsed.video_adapter,
-                    parsed.video_chipset,
-                    parsed.audio_detected,
-                    parsed.bios_family,
-                    parsed.dhrystones,
-                    parsed.whetstone_kwips,
-                    parsed.mem_write_kbps,
-                    parsed.mem_read_kbps,
-                    parsed.mem_copy_kbps,
-                    parsed.emulator,
-                ),
-            )
+            db.execute(_SUBMIT_SQL, values)
             db.commit()
             return submission_id, None
         except sqlite3.IntegrityError as e:
@@ -194,20 +185,22 @@ def _insert_with_retry(db, parsed):
                         f"duplicate: already recorded as "
                         f"{_submission_url(existing['id'])}",
                     )
-                return None, _plain_error(400, f"db integrity: {e}")
+                current_app.logger.warning(
+                    "db integrity (run_signature path): %s", e
+                )
+                return None, _plain_error(400, "database integrity error")
             if "submissions.id" in msg or "primary key" in msg:
                 # 32-bit id collision. Loop and pick a new one.
                 continue
-            return None, _plain_error(400, f"db integrity: {e}")
+            current_app.logger.warning("db integrity: %s", e)
+            return None, _plain_error(400, "database integrity error")
     return None, _plain_error(
         500, "submission_id retry budget exhausted"
     )
 
 
 def _submission_url(sub_id: str) -> str:
-    base = current_app.config.get(
-        "PUBLIC_BASE", "http://127.0.0.1:5000"
-    ).rstrip("/")
+    base = current_app.config["PUBLIC_BASE"].rstrip("/")
     return f"{base}/cerberus/run/{sub_id}"
 
 

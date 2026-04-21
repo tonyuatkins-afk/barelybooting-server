@@ -1,27 +1,11 @@
-"""Browse-page integration tests."""
+"""Browse-page integration tests.
+
+``client`` fixture comes from ``tests/conftest.py``.
+"""
 
 from __future__ import annotations
 
-import os
-import tempfile
-
-import pytest
-
-from barelybooting import create_app
-from barelybooting.db import init_db
-
 from .fixtures import canonical_ini
-
-
-@pytest.fixture
-def client():
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
-    os.close(fd)
-    init_db(path)
-    app = create_app({"DATABASE": path, "TESTING": True})
-    with app.test_client() as c:
-        yield c
-    os.unlink(path)
 
 
 def _submit(client, **kw):
@@ -94,6 +78,18 @@ def test_run_detail(client):
 def test_run_detail_404(client):
     resp = client.get("/cerberus/run/no-such-id")
     assert resp.status_code == 404
+
+
+def test_pagination_page_past_end_clamps_to_last(client):
+    # One submission means one page. ?page=999 should still render the
+    # submission (clamped to page 1), not an empty "No submissions"
+    # screen. Without the clamp, OFFSET=24950 would return zero rows.
+    sub_id = _submit(client, run_signature="pageclamp0000001")
+    resp = client.get("/cerberus/?page=999")
+    assert resp.status_code == 200
+    assert b"1 submission" in resp.data
+    assert sub_id.encode() in resp.data
+    assert b"No submissions" not in resp.data
 
 
 def test_unknown_filter(client):

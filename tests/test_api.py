@@ -1,37 +1,11 @@
-"""API endpoint integration tests via Flask's test client."""
+"""API endpoint integration tests via Flask's test client.
+
+``app`` and ``client`` fixtures come from ``tests/conftest.py``.
+"""
 
 from __future__ import annotations
 
-import os
-import tempfile
-
-import pytest
-
-from barelybooting import create_app
-from barelybooting.db import init_db
-
 from .fixtures import canonical_ini
-
-
-@pytest.fixture
-def app():
-    # Fresh temp DB per test. Rate limiter disabled so per-test loops
-    # (e.g. testing 6 inserts in one test) don't trip the 5/min cap.
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
-    os.close(fd)
-    init_db(path)
-    app = create_app({
-        "DATABASE": path,
-        "TESTING": True,
-        "RATELIMIT_ENABLED": False,
-    })
-    yield app
-    os.unlink(path)
-
-
-@pytest.fixture
-def client(app):
-    return app.test_client()
 
 
 def test_health(client):
@@ -142,6 +116,61 @@ def test_security_headers_set(client):
     assert "script-src 'none'" in csp
     assert resp.headers.get("X-Frame-Options") == "DENY"
     assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+
+
+def test_submit_at_max_content_length_succeeds(client):
+    # Craft a body exactly 64 KB. Uses a [future_section] pad key that the
+    # parser accepts but ignores; the canonical INI provides the required
+    # [cerberus] fields. Confirms the MAX_CONTENT_LENGTH=64*1024 ceiling
+    # includes the boundary.
+    base = canonical_ini(run_signature="maxsize000000001")
+    padding_needed = 64 * 1024 - len(base) - len("\n[pad]\npad=\n")
+    pad_value = "x" * padding_needed
+    body = base + "\n[pad]\npad=" + pad_value + "\n"
+    assert len(body) == 64 * 1024
+    resp = client.post(
+        "/api/v1/submit", data=body, content_type="text/plain"
+    )
+    assert resp.status_code == 200
+
+
+def test_submit_over_max_content_length_returns_413(client):
+    # One byte over the ceiling. Werkzeug short-circuits before the
+    # route runs, so we just need the size to exceed 64 KB.
+    body = canonical_ini() + ("x" * (64 * 1024))
+    resp = client.post(
+        "/api/v1/submit", data=body, content_type="text/plain"
+    )
+    assert resp.status_code == 413
+
+
+def test_submission_id_retries_on_collision(client, monkeypatch):
+    """When _new_submission_id returns a value that already exists, the
+    insert path must retry with a fresh id rather than 400ing the caller.
+    We force a collision by monkeypatching the generator to return a
+    fixed value for the first two calls."""
+    from barelybooting.routes import api as api_mod
+
+    # First submission gets id "aaaaaaaa". Second tries "aaaaaaaa" (PK
+    # collision), then "bbbbbbbb" (succeeds).
+    ids = iter(["aaaaaaaa", "aaaaaaaa", "bbbbbbbb"])
+    monkeypatch.setattr(api_mod, "_new_submission_id", lambda: next(ids))
+
+    first = client.post(
+        "/api/v1/submit",
+        data=canonical_ini(run_signature="retry0000000001a"),
+        content_type="text/plain",
+    )
+    assert first.status_code == 200
+    assert first.data.decode("ascii").splitlines()[0] == "aaaaaaaa"
+
+    second = client.post(
+        "/api/v1/submit",
+        data=canonical_ini(run_signature="retry0000000002b"),
+        content_type="text/plain",
+    )
+    assert second.status_code == 200
+    assert second.data.decode("ascii").splitlines()[0] == "bbbbbbbb"
 
 
 def test_two_distinct_submissions_both_succeed(client):

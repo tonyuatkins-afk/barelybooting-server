@@ -5,18 +5,34 @@ Flask application factory. Routes are split across two blueprints:
 * ``api``      machine-facing JSON/plain-text endpoints (submit, health)
 * ``browse``   human-facing HTML pages (list, detail, per-CPU-class)
 
-Config is minimal: ``DATABASE`` is the SQLite file path, ``PUBLIC_BASE``
-is the external URL used to build per-submission links in the
-``POST /api/v1/submit`` response. Both have sensible defaults for local
-dev.
+Configuration keys (all settable via env or ``create_app({...})``):
+
+=====================  =============  ==========================================
+Key                    Env var        Meaning
+=====================  =============  ==========================================
+DATABASE               BAREBOOT_DB    Path to the SQLite file.
+PUBLIC_BASE            BAREBOOT_      External URL used when building per-
+                       PUBLIC_BASE    submission links in the submit response.
+BAREBOOT_ENV           BAREBOOT_ENV   ``production`` hardens startup checks.
+MAX_CONTENT_LENGTH     (none)         64 KB by default; matches the upload
+                                      contract's server commitment.
+RATELIMIT_ENABLED      BAREBOOT_      Flask-Limiter master switch.
+                       RATELIMIT      ``0`` disables (tests / dev).
+RATELIMIT_SUBMIT       BAREBOOT_      Rate-limit spec for POST /api/v1/submit.
+                       RATELIMIT_     Flask-Limiter string syntax.
+                       SUBMIT
+=====================  =============  ==========================================
 """
 
 import os
-from flask import Flask
+from flask import Flask, request
 
 from . import db
 from .extensions import limiter
 from .routes import api, browse
+
+
+_LOCAL_PUBLIC_BASE = "http://127.0.0.1:5000"
 
 
 def _security_headers(resp):
@@ -39,6 +55,43 @@ def _security_headers(resp):
     return resp
 
 
+def _log_client_errors(resp):
+    """Leave a minimal audit trail for any 4xx/5xx. Enough to answer
+    'who's hammering me' after the fact without turning the log into
+    PII storage. We hash-prefix the client IP so logs remain useful
+    for clustering attackers without storing raw addresses indefinitely."""
+    if resp.status_code >= 400 and request.path != "/api/v1/health":
+        client_ip = (
+            request.headers.get("CF-Connecting-IP")
+            or request.remote_addr
+            or "-"
+        )
+        ua = request.headers.get("User-Agent", "-")[:120]
+        from flask import current_app
+        current_app.logger.warning(
+            "client_error status=%d method=%s path=%s ip=%s ua=%r",
+            resp.status_code, request.method, request.path,
+            client_ip, ua,
+        )
+    return resp
+
+
+def _validate_production_config(app: Flask) -> None:
+    """In production mode, refuse to start if PUBLIC_BASE still points
+    at the local fallback. A misconfigured deploy silently returning
+    loopback URLs to DOS clients is exactly the kind of footgun we want
+    to catch before the first POST."""
+    if app.config.get("BAREBOOT_ENV") != "production":
+        return
+    base = app.config.get("PUBLIC_BASE", "")
+    if not base or "127.0.0.1" in base or "localhost" in base:
+        raise RuntimeError(
+            "BAREBOOT_ENV=production requires BAREBOOT_PUBLIC_BASE to be "
+            "set to a real external URL (e.g. https://barelybooting.com). "
+            f"Got: {base!r}"
+        )
+
+
 def create_app(config_overrides: dict | None = None) -> Flask:
     app = Flask(__name__, instance_relative_config=False)
 
@@ -49,22 +102,26 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         ),
         PUBLIC_BASE=os.environ.get(
             "BAREBOOT_PUBLIC_BASE",
-            "http://127.0.0.1:5000",
+            _LOCAL_PUBLIC_BASE,
         ),
-        # Max upload body. CERBERUS INIs are typically 4 to 8 KB; 64 KB
-        # matches the contract's server commitment.
+        BAREBOOT_ENV=os.environ.get("BAREBOOT_ENV", "development"),
         MAX_CONTENT_LENGTH=64 * 1024,
-        # Flask-Limiter: let env disable it for tests / local dev.
         RATELIMIT_ENABLED=os.environ.get(
             "BAREBOOT_RATELIMIT", "1"
         ) != "0",
+        RATELIMIT_SUBMIT=os.environ.get(
+            "BAREBOOT_RATELIMIT_SUBMIT", "30 per hour; 5 per minute"
+        ),
     )
     if config_overrides:
         app.config.update(config_overrides)
 
+    _validate_production_config(app)
+
     db.init_app(app)
     limiter.init_app(app)
     app.after_request(_security_headers)
+    app.after_request(_log_client_errors)
 
     app.register_blueprint(api.bp)
     app.register_blueprint(browse.bp)

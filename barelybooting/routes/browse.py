@@ -12,20 +12,40 @@ bp = Blueprint("browse", __name__, url_prefix="/cerberus")
 
 PAGE_SIZE = 25
 
+# Cap the page index so a hostile ``?page=999999`` request doesn't
+# enumerate a pointless OFFSET. 4000 pages * 25 rows = 100k submissions,
+# well past anything this project will plausibly see.
+MAX_PAGE = 4000
 
-def _paginate(query: str, args: tuple, page: int):
+
+def _paginate(
+    select_sql: str,
+    where_sql: str,
+    args: tuple,
+    page: int,
+):
+    """Run two queries: one COUNT(*) against the predicate alone, one
+    paginated SELECT. ``select_sql`` is the full ``SELECT * FROM ... [WHERE]
+    ORDER BY ...`` form; ``where_sql`` is just ``FROM submissions [WHERE
+    ...]`` with no ORDER BY, used to compute the count cheaply."""
     db = get_db()
-    offset = (page - 1) * PAGE_SIZE
-    rows = db.execute(
-        f"{query} LIMIT ? OFFSET ?",
-        args + (PAGE_SIZE, offset),
-    ).fetchall()
     total_count = db.execute(
-        f"SELECT COUNT(*) AS n FROM ({query})",
+        f"SELECT COUNT(*) AS n {where_sql}",
         args,
     ).fetchone()["n"]
     total_pages = max(1, (total_count + PAGE_SIZE - 1) // PAGE_SIZE)
-    return rows, total_pages, total_count
+
+    # Clamp the requested page to [1, total_pages] to avoid empty reads
+    # on pathological ``?page=`` values. Silent clamp is intentional:
+    # user-typed URLs past the end should degrade to the last page, not
+    # 404.
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PAGE_SIZE
+    rows = db.execute(
+        f"{select_sql} LIMIT ? OFFSET ?",
+        args + (PAGE_SIZE, offset),
+    ).fetchall()
+    return rows, page, total_pages, total_count
 
 
 def _page_arg() -> int:
@@ -33,16 +53,16 @@ def _page_arg() -> int:
         p = int(request.args.get("page", "1"))
     except ValueError:
         p = 1
-    return max(1, p)
+    return max(1, min(p, MAX_PAGE))
 
 
 @bp.route("/")
 def browse_index():
-    page = _page_arg()
-    rows, total_pages, count = _paginate(
+    rows, page, total_pages, count = _paginate(
         "SELECT * FROM submissions ORDER BY received_at DESC",
+        "FROM submissions",
         (),
-        page,
+        _page_arg(),
     )
     return render_template(
         "browse_list.html",
@@ -58,12 +78,12 @@ def browse_index():
 
 @bp.route("/cpu/<cpu_class>")
 def browse_cpu(cpu_class: str):
-    page = _page_arg()
-    rows, total_pages, count = _paginate(
+    rows, page, total_pages, count = _paginate(
         "SELECT * FROM submissions WHERE cpu_class = ? "
         "ORDER BY received_at DESC",
+        "FROM submissions WHERE cpu_class = ?",
         (cpu_class.lower(),),
-        page,
+        _page_arg(),
     )
     return render_template(
         "browse_list.html",
@@ -79,12 +99,12 @@ def browse_cpu(cpu_class: str):
 
 @bp.route("/machine/<hw_sig>")
 def browse_machine(hw_sig: str):
-    page = _page_arg()
-    rows, total_pages, count = _paginate(
+    rows, page, total_pages, count = _paginate(
         "SELECT * FROM submissions WHERE hardware_signature = ? "
         "ORDER BY received_at DESC",
+        "FROM submissions WHERE hardware_signature = ?",
         (hw_sig.lower(),),
-        page,
+        _page_arg(),
     )
     return render_template(
         "browse_list.html",
@@ -100,15 +120,17 @@ def browse_machine(hw_sig: str):
 
 @bp.route("/unknown")
 def browse_unknown():
-    page = _page_arg()
-    rows, total_pages, count = _paginate(
-        "SELECT * FROM submissions "
+    unknown_where = (
+        "FROM submissions "
         "WHERE cpu_class IS NULL "
         "   OR cpu_class = 'unknown' "
-        "   OR cpu_detected LIKE '%unknown%' "
-        "ORDER BY received_at DESC",
+        "   OR cpu_detected LIKE '%unknown%'"
+    )
+    rows, page, total_pages, count = _paginate(
+        f"SELECT * {unknown_where} ORDER BY received_at DESC",
+        unknown_where,
         (),
-        page,
+        _page_arg(),
     )
     return render_template(
         "browse_list.html",

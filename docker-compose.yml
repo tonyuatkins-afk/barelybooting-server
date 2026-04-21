@@ -1,12 +1,13 @@
 services:
   barelybooting:
     build: .
-    image: barelybooting-server:latest
+    image: barelybooting-server:0.1.1
     container_name: barelybooting
     restart: unless-stopped
     environment:
       BAREBOOT_DB: /data/barelybooting.sqlite
       BAREBOOT_PUBLIC_BASE: ${BAREBOOT_PUBLIC_BASE:-https://barelybooting.com}
+      BAREBOOT_ENV: production
       PORT: 8080
     volumes:
       - barelybooting_data:/data
@@ -19,6 +20,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Resource ceilings: hard-cap blast radius on the co-tenant HA host.
+    # Comfortable for the projected workload (POSTs are tiny, browse
+    # pages read from SQLite); bump if you ever add heavy analytics.
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
     networks:
       - web
     healthcheck:
@@ -44,6 +51,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
     networks:
       - web
 

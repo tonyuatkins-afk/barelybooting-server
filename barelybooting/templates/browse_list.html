@@ -24,16 +24,16 @@
     <tr>
       <td><a href="/cerberus/run/{{ r.id }}">{{ r.id }}</a></td>
       <td>{{ r.received_at }}</td>
-      <td>{{ r.cpu_detected or r.cpu_class or "—" }}</td>
-      <td>{{ r.fpu_detected or "—" }}</td>
+      <td>{{ r.cpu_detected or r.cpu_class or "-" }}</td>
+      <td>{{ r.fpu_detected or "-" }}</td>
       <td>
         {% if r.memory_conv_kb is not none or r.memory_ext_kb is not none -%}
         {{ r.memory_conv_kb or 0 }} + {{ r.memory_ext_kb or 0 }}
-        {%- else -%}—{%- endif %}
+        {%- else -%}-{%- endif %}
       </td>
-      <td>{{ r.video_adapter or "—" }}{% if r.video_chipset %} / {{ r.video_chipset }}{% endif %}</td>
-      <td>{{ r.audio_detected or "—" }}</td>
-      <td>{{ r.nickname or "—" }}</td>
+      <td>{{ r.video_adapter or "-" }}{% if r.video_chipset %} / {{ r.video_chipset }}{% endif %}</td>
+      <td>{{ r.audio_detected or "-" }}</td>
+      <td>{{ r.nickname or "-" }}</td>
     </tr>
     {% endfor %}
   </tbody>
