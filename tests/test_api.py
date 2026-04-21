@@ -177,9 +177,44 @@ def test_security_headers_set(client):
     resp = client.get("/api/v1/health")
     assert resp.status_code == 200
     csp = resp.headers.get("Content-Security-Policy", "")
+    # Core CSP: deny-by-default with explicit allowlists.
+    assert "default-src 'none'" in csp
     assert "script-src 'none'" in csp
+    assert "object-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
     assert resp.headers.get("X-Frame-Options") == "DENY"
     assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+    # Permissions-Policy locks down platform features we never use.
+    pp = resp.headers.get("Permissions-Policy", "")
+    assert "geolocation=()" in pp
+    assert "camera=()" in pp
+
+
+def test_browse_pages_are_cacheable(client):
+    # 200 GET on browse pages should carry a short public cache hint.
+    resp = client.get("/cerberus/")
+    assert resp.status_code == 200
+    assert "public" in resp.headers.get("Cache-Control", "")
+    assert "max-age=300" in resp.headers.get("Cache-Control", "")
+
+
+def test_api_responses_not_cached(client):
+    # API endpoints must never be cached by the edge.
+    resp = client.get("/api/v1/health")
+    assert resp.status_code == 200
+    assert "Cache-Control" not in resp.headers or \
+        "public" not in resp.headers.get("Cache-Control", "")
+
+
+def test_post_responses_not_cached(client):
+    # POSTs never get the public cache directive.
+    resp = client.post(
+        "/api/v1/submit",
+        data=canonical_ini(run_signature="ca5e0000ca5e0000"),
+        content_type="text/plain",
+    )
+    assert resp.status_code == 200
+    assert "public" not in resp.headers.get("Cache-Control", "")
 
 
 def test_submit_at_max_content_length_succeeds(client):

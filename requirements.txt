@@ -1,3 +1,8 @@
-Flask>=3.0.0
-waitress>=3.0.0
-Flask-Limiter>=3.8.0
+# Direct dependencies. Pin exact versions so the Docker image built
+# today is byte-for-byte the same as the one built tomorrow. Dependabot
+# (.github/dependabot.yml) opens a PR when a pin falls behind, so we
+# see every version bump as a reviewable change instead of discovering
+# silent drift at deploy time.
+Flask==3.1.3
+waitress==3.0.2
+Flask-Limiter==4.1.1

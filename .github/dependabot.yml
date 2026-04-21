@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Python dependencies declared in requirements.txt. When Dependabot
+  # opens a PR, regenerate requirements-lock.txt before merging:
+  #   pip install -r requirements.txt && pip freeze > requirements-lock.txt
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies, python]
+
+  # Docker base image. Tracks the FROM line in the Dockerfile.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels: [dependencies, docker]
+
+  # GitHub Actions workflow pins. Keeps actions/checkout, setup-python,
+  # etc. on current major versions.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels: [dependencies, ci]

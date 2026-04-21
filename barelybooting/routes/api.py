@@ -169,26 +169,33 @@ _SUBMIT_COLUMNS = (
     "mem_copy_kbps",
     "emulator",
 )
+# The ON CONFLICT clause makes run_signature duplicates silent
+# (rowcount=0, no exception), so we can distinguish "duplicate run
+# resubmitted" from "PK collision on id" via the insert's side-effect
+# count instead of matching substrings in the SQLite error message. The
+# id column's PK constraint is still enforced and still raises on
+# collision, which keeps the retry loop working.
 _SUBMIT_SQL = (
     f"INSERT INTO submissions ({', '.join(_SUBMIT_COLUMNS)}) "
-    f"VALUES ({', '.join(['?'] * len(_SUBMIT_COLUMNS))})"
+    f"VALUES ({', '.join(['?'] * len(_SUBMIT_COLUMNS))}) "
+    f"ON CONFLICT(run_signature) DO NOTHING"
 )
 
 
 def _insert_with_retry(db, parsed):
     """INSERT the parsed row, regenerating submission_id on PK collision.
     Returns (submission_id, None) on success, (None, Response) on fatal
-    error. run_signature collisions are a 409 (duplicate run);
-    submission_id collisions just retry."""
+    error. run_signature collisions land as ON CONFLICT DO NOTHING
+    (rowcount=0, 409 returned); submission_id collisions still raise
+    IntegrityError and trigger the retry loop."""
     for _ in range(ID_RETRY_LIMIT):
         submission_id = _new_submission_id()
         values = (submission_id,) + tuple(
             getattr(parsed, col) for col in _SUBMIT_COLUMNS[1:]
         )
         try:
-            db.execute(_SUBMIT_SQL, values)
+            cur = db.execute(_SUBMIT_SQL, values)
             db.commit()
-            return submission_id, None
         except sqlite3.OperationalError as e:
             # "database is locked" or similar WAL-pressure condition.
             # get_db() sets busy_timeout so these should be rare, but
@@ -197,27 +204,33 @@ def _insert_with_retry(db, parsed):
             current_app.logger.warning("db busy on insert: %s", e)
             return None, _plain_error(503, "database busy, retry shortly")
         except sqlite3.IntegrityError as e:
-            msg = str(e).lower()
-            if "run_signature" in msg:
-                existing = db.execute(
-                    "SELECT id FROM submissions WHERE run_signature = ?",
-                    (parsed.run_signature,),
-                ).fetchone()
-                if existing:
-                    return None, _plain_error(
-                        409,
-                        f"duplicate: already recorded as "
-                        f"{_submission_url(existing['id'])}",
-                    )
-                current_app.logger.warning(
-                    "db integrity (run_signature path): %s", e
-                )
-                return None, _plain_error(400, "database integrity error")
-            if "submissions.id" in msg or "primary key" in msg:
-                # 32-bit id collision. Loop and pick a new one.
-                continue
-            current_app.logger.warning("db integrity: %s", e)
-            return None, _plain_error(400, "database integrity error")
+            # With ON CONFLICT(run_signature) DO NOTHING, the only
+            # remaining integrity path here is a PK collision on id.
+            # Loop and pick a new id; no string-matching needed.
+            current_app.logger.debug("submission_id PK collision: %s", e)
+            continue
+
+        if cur.rowcount == 1:
+            return submission_id, None
+
+        # rowcount == 0 means ON CONFLICT(run_signature) DO NOTHING
+        # fired: this run_signature already exists. Fetch the existing
+        # submission's id so the 409 body points at it.
+        existing = db.execute(
+            "SELECT id FROM submissions WHERE run_signature = ?",
+            (parsed.run_signature,),
+        ).fetchone()
+        if existing:
+            return None, _plain_error(
+                409,
+                f"duplicate: already recorded as "
+                f"{_submission_url(existing['id'])}",
+            )
+        # Theoretical path: ON CONFLICT fired but the row vanished
+        # between INSERT and SELECT. Treat as a controlled 409 rather
+        # than pretending the insert succeeded.
+        return None, _plain_error(409, "duplicate run_signature")
+
     return None, _plain_error(
         500, "submission_id retry budget exhausted"
     )

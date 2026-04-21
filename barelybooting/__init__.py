@@ -38,22 +38,57 @@ _LOCAL_PUBLIC_BASE = "http://127.0.0.1:5000"
 
 
 def _security_headers(resp):
-    """Belt-and-braces response headers. The site has no JS and no
-    third-party assets; we lock both down explicitly so a future
-    ``|safe`` slip cannot load a script or embed the page in a frame."""
+    """Belt-and-braces response headers. The site has no JS, no custom
+    fonts, and no third-party assets; we start from ``default-src
+    'none'`` and then explicitly allow only what the site actually uses.
+    Any future ``|safe`` slip, dependency bug, or stray inline handler
+    would need to bypass the specific directive, not just fall back to
+    a permissive default.
+
+    HSTS is NOT set here. Cloudflare terminates TLS at the edge and
+    handles HSTS for browser traffic via its SSL/TLS > Edge
+    Certificates panel (configured in DEPLOY.md). Setting it on the
+    origin response is redundant and would force HTTPS for the plain-
+    HTTP DOS clients that the contract explicitly supports."""
     resp.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; "
-        "script-src 'none'; "
+        "default-src 'none'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
-        "frame-ancestors 'none'; "
+        "form-action 'self'; "
         "base-uri 'self'; "
-        "form-action 'self'",
+        "frame-ancestors 'none'; "
+        "object-src 'none'; "
+        "script-src 'none'",
     )
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     resp.headers.setdefault("X-Frame-Options", "DENY")
+    # Disable platform features the browser would otherwise expose to
+    # any script we accidentally ship. There are none today, but if a
+    # template starts leaking one, the browser refuses the permission.
+    resp.headers.setdefault(
+        "Permissions-Policy",
+        "accelerometer=(), camera=(), geolocation=(), gyroscope=(), "
+        "magnetometer=(), microphone=(), payment=(), usb=()",
+    )
+    return resp
+
+
+def _cache_headers(resp):
+    """Let browsers and the Cloudflare edge cache public browse pages
+    for a short interval. Submissions are append-only and per-id pages
+    never change once written; the index/filter pages change only when
+    a new submission lands, so a 5-minute TTL is a cheap way to absorb
+    scraper traffic without touching SQLite on every hit. POSTs and
+    errors stay uncached."""
+    if request.method != "GET":
+        return resp
+    if resp.status_code != 200:
+        return resp
+    if request.path.startswith("/api/"):
+        return resp
+    resp.headers.setdefault("Cache-Control", "public, max-age=300")
     return resp
 
 
@@ -64,6 +99,8 @@ def _log_client_errors(resp):
     the docker/host log rotation policy says; these logs are expected
     to identify specific abusers, not to remain forever."""
     if resp.status_code >= 400 and request.path != "/api/v1/health":
+        # Deliberately NOT reading X-Forwarded-For. See extensions.py
+        # _client_key for the trust-boundary reasoning.
         client_ip = (
             request.headers.get("CF-Connecting-IP")
             or request.remote_addr
@@ -137,6 +174,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     db.init_app(app)
     limiter.init_app(app)
     app.after_request(_security_headers)
+    app.after_request(_cache_headers)
     app.after_request(_log_client_errors)
     app.register_error_handler(sqlite3.OperationalError, _db_busy_handler)
 

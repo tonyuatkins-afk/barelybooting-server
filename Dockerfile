@@ -11,8 +11,11 @@ RUN adduser --disabled-password --gecos "" --uid 1000 app \
     && mkdir -p /data \
     && chown app:app /data
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-lock.txt ./
+# Install from the lock file so the dependency closure is byte-for-byte
+# reproducible. requirements.txt stays as the human-maintained source
+# of truth; requirements-lock.txt is regenerated from pip freeze.
+RUN pip install --no-cache-dir -r requirements-lock.txt
 
 COPY barelybooting ./barelybooting
 

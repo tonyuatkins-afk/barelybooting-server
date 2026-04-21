@@ -103,6 +103,16 @@ these on (all free tier):
 These take ~5 minutes to configure and pay for themselves the first
 time a scanner finds the domain.
 
+Also set **HSTS** for browser traffic: SSL/TLS > Edge Certificates >
+HTTP Strict Transport Security (HSTS) > Enable. Suggested settings:
+`max-age=6 months`, include subdomains ON, preload OFF (you can
+opt into the preload list later once you're sure the domain should
+only ever serve HTTPS). HSTS is deliberately NOT set by the app
+itself: Cloudflare terminates TLS at the edge, and the origin also
+accepts plain HTTP from DOS clients per the upload contract. The edge
+injects HSTS for browser viewers without constraining the DOS-client
+path.
+
 ### 4. Clone the repo onto the HA host
 
 ```

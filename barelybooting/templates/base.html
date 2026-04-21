@@ -86,6 +86,9 @@
     color: var(--fg-dim);
     font-size: 0.8rem;
   }
+  footer p { margin: 0.3rem 0; }
+  footer .notice { color: var(--warn); }
+  footer code { color: var(--fg); }
 </style>
 </head>
 <body>
@@ -104,8 +107,19 @@
 {% block content %}{% endblock %}
 
 <footer>
-  Submissions from the <a href="https://github.com/tonyuatkins-afk/CERBERUS">CERBERUS</a>
-  DOS diagnostic tool. Data freely browsable, hosted at barelybooting.com.
+  <p>
+    Submissions from the <a href="https://github.com/tonyuatkins-afk/CERBERUS">CERBERUS</a>
+    DOS diagnostic tool. Data freely browsable, hosted at barelybooting.com.
+  </p>
+  <p class="notice">
+    <strong>Submissions are public.</strong> The raw <code>CERBERUS.INI</code>
+    is archived verbatim and shown on each run's page. CERBERUS does not
+    capture paths, environment variables, or other host details beyond
+    the hardware report, but any text you type into
+    <code>/NICK</code> or <code>/NOTE</code> becomes part of the public
+    record. Pass <code>/NOUPLOAD</code> on the CERBERUS command line if
+    you want to keep a run private.
+  </p>
 </footer>
 </body>
 </html>
