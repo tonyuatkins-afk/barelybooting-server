@@ -1,0 +1,54 @@
+services:
+  barelybooting:
+    build: .
+    image: barelybooting-server:latest
+    container_name: barelybooting
+    restart: unless-stopped
+    environment:
+      BAREBOOT_DB: /data/barelybooting.sqlite
+      BAREBOOT_PUBLIC_BASE: ${BAREBOOT_PUBLIC_BASE:-https://barelybooting.com}
+      PORT: 8080
+    volumes:
+      - barelybooting_data:/data
+    expose:
+      - "8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/v1/health',timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # Pin cloudflared to a known release. Bump periodically:
+  # https://github.com/cloudflare/cloudflared/releases
+  cloudflared:
+    image: cloudflare/cloudflared:2024.12.2
+    container_name: barelybooting-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      barelybooting:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - web
+
+volumes:
+  barelybooting_data:
+
+networks:
+  web:

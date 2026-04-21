@@ -65,6 +65,9 @@ Production:  `barelybooting.com/cerberus/`
 Staging:     any port on a VPS or home server
 Dev:         `127.0.0.1:5000`
 
+For the production deployment (Docker + Cloudflare Tunnel on Home
+Assistant OS), see [DEPLOY.md](DEPLOY.md).
+
 ## License
 
 MIT, same as CERBERUS.

@@ -15,11 +15,16 @@ from .fixtures import canonical_ini
 
 @pytest.fixture
 def app():
-    # Fresh temp DB per test.
+    # Fresh temp DB per test. Rate limiter disabled so per-test loops
+    # (e.g. testing 6 inserts in one test) don't trip the 5/min cap.
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
     init_db(path)
-    app = create_app({"DATABASE": path, "TESTING": True})
+    app = create_app({
+        "DATABASE": path,
+        "TESTING": True,
+        "RATELIMIT_ENABLED": False,
+    })
     yield app
     os.unlink(path)
 
@@ -86,6 +91,57 @@ def test_duplicate_run_signature_returns_409(client):
         "/api/v1/submit", data=body, content_type="text/plain"
     )
     assert second.status_code == 409
+
+
+def test_submit_nickname_too_long_returns_400(client):
+    body = canonical_ini(
+        run_signature="nicktest00000001", nickname="x" * 33
+    )
+    resp = client.post(
+        "/api/v1/submit", data=body, content_type="text/plain"
+    )
+    assert resp.status_code == 400
+    assert b"nickname" in resp.data
+
+
+def test_submit_notes_too_long_returns_400(client):
+    body = canonical_ini(
+        run_signature="notetest00000001", notes="x" * 129
+    )
+    resp = client.post(
+        "/api/v1/submit", data=body, content_type="text/plain"
+    )
+    assert resp.status_code == 400
+    assert b"notes" in resp.data
+
+
+def test_submit_non_ascii_body_returns_400(client):
+    # non-ASCII byte (0xE9) should be rejected, not silently mangled
+    body = canonical_ini().encode("ascii") + b"\n; cafe\xe9\n"
+    resp = client.post(
+        "/api/v1/submit", data=body, content_type="text/plain"
+    )
+    assert resp.status_code == 400
+    assert b"non-ascii" in resp.data
+
+
+def test_submit_rejects_json_content_type(client):
+    resp = client.post(
+        "/api/v1/submit",
+        data=canonical_ini(),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    assert b"content-type" in resp.data
+
+
+def test_security_headers_set(client):
+    resp = client.get("/api/v1/health")
+    assert resp.status_code == 200
+    csp = resp.headers.get("Content-Security-Policy", "")
+    assert "script-src 'none'" in csp
+    assert resp.headers.get("X-Frame-Options") == "DENY"
+    assert resp.headers.get("X-Content-Type-Options") == "nosniff"
 
 
 def test_two_distinct_submissions_both_succeed(client):
