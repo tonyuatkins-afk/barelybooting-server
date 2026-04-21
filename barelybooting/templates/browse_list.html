@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+
+<h1>{{ title }}</h1>
+<p>{{ total_count }} submission{{ "s" if total_count != 1 else "" }}.</p>
+
+{% if rows %}
+<table class="submissions">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Received</th>
+      <th>CPU</th>
+      <th>FPU</th>
+      <th>Mem (conv+ext KB)</th>
+      <th>Video</th>
+      <th>Audio</th>
+      <th>Nickname</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><a href="/cerberus/run/{{ r.id }}">{{ r.id }}</a></td>
+      <td>{{ r.received_at }}</td>
+      <td>{{ r.cpu_detected or r.cpu_class or "—" }}</td>
+      <td>{{ r.fpu_detected or "—" }}</td>
+      <td>
+        {% if r.memory_conv_kb is not none or r.memory_ext_kb is not none -%}
+        {{ r.memory_conv_kb or 0 }} + {{ r.memory_ext_kb or 0 }}
+        {%- else -%}—{%- endif %}
+      </td>
+      <td>{{ r.video_adapter or "—" }}{% if r.video_chipset %} / {{ r.video_chipset }}{% endif %}</td>
+      <td>{{ r.audio_detected or "—" }}</td>
+      <td>{{ r.nickname or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p><em>No submissions match this filter yet.</em></p>
+{% endif %}
+
+{% if total_pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}
+  <a href="?page={{ page - 1 }}">&laquo; newer</a>
+  {% endif %}
+  page {{ page }} of {{ total_pages }}
+  {% if page < total_pages %}
+  <a href="?page={{ page + 1 }}">older &raquo;</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

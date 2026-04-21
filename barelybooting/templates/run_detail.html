@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ row.id }} — {{ row.cpu_detected or row.cpu_class or "unknown" }}{% endblock %}
+{% block content %}
+
+<h1>Submission {{ row.id }}</h1>
+<p>
+  <span class="badge">received {{ row.received_at }}</span>
+  <span class="badge">CERBERUS {{ row.client_version }}</span>
+  <span class="badge">ini_format {{ row.ini_format }}</span>
+</p>
+
+<h2>Identity</h2>
+<dl class="kv">
+  <dt>Hardware signature</dt>
+  <dd>
+    {{ row.hardware_signature }}
+    <a href="/cerberus/machine/{{ row.hardware_signature }}">(all runs from this machine)</a>
+  </dd>
+  <dt>Run signature</dt><dd>{{ row.run_signature }}</dd>
+  {% if row.nickname %}<dt>Nickname</dt><dd>{{ row.nickname }}</dd>{% endif %}
+  {% if row.notes %}<dt>Notes</dt><dd>{{ row.notes }}</dd>{% endif %}
+</dl>
+
+<h2>Hardware</h2>
+<dl class="kv">
+  <dt>CPU</dt>
+  <dd>
+    {{ row.cpu_detected or "—" }}
+    {% if row.cpu_class %}
+      <a href="/cerberus/cpu/{{ row.cpu_class }}">({{ row.cpu_class }} class)</a>
+    {% endif %}
+  </dd>
+  <dt>FPU</dt><dd>{{ row.fpu_detected or "—" }}</dd>
+  <dt>Conventional memory</dt><dd>{{ row.memory_conv_kb or "—" }} KB</dd>
+  <dt>Extended memory</dt><dd>{{ row.memory_ext_kb or "—" }} KB</dd>
+  <dt>Cache</dt><dd>{{ row.cache_present or "—" }}</dd>
+  <dt>Bus</dt><dd>{{ row.bus_class or "—" }}</dd>
+  <dt>Video</dt><dd>{{ row.video_adapter or "—" }}{% if row.video_chipset %} / {{ row.video_chipset }}{% endif %}</dd>
+  <dt>Audio</dt><dd>{{ row.audio_detected or "—" }}</dd>
+  <dt>BIOS</dt><dd>{{ row.bios_family or "—" }}</dd>
+  {% if row.emulator and row.emulator != "none" %}
+  <dt>Emulator</dt><dd>{{ row.emulator }}</dd>
+  {% endif %}
+</dl>
+
+<h2>Benchmarks</h2>
+<dl class="kv">
+  <dt>Dhrystones</dt><dd>{{ row.dhrystones or "—" }}</dd>
+  <dt>K-Whetstone</dt><dd>{{ row.whetstone_kwips or "—" }}</dd>
+  <dt>Memory write</dt><dd>{{ row.mem_write_kbps or "—" }} KB/s</dd>
+  <dt>Memory read</dt><dd>{{ row.mem_read_kbps or "—" }} KB/s</dd>
+  <dt>Memory copy</dt><dd>{{ row.mem_copy_kbps or "—" }} KB/s</dd>
+</dl>
+
+<h2>Raw CERBERUS.INI</h2>
+<pre>{{ row.ini_raw }}</pre>
+
+{% endblock %}
