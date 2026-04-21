@@ -76,6 +76,26 @@ the tunnel. The current CERBERUS client hard-codes `barelybooting.com`
 in `UPLOAD_URL` (`src/upload/upload.c`), so whichever hostname you
 pick, make sure the next CERBERUS build matches.
 
+### Apex coexistence via Cloudflare Worker
+
+If the apex `barelybooting.com` is already serving a GitHub Pages
+landing site and you want `/api/*` + `/cerberus/*` at the apex
+without moving the landing page, use the Worker approach:
+
+1. Add a tunnel public hostname `tunnel.barelybooting.com` with
+   service `http://barelybooting:8080`. This gives the Worker an
+   internal-ish hostname to proxy through.
+2. Leave the apex DNS pointing at GitHub Pages as it already is.
+3. Workers & Pages > Create Worker. Paste
+   `deploy/cloudflare-worker.js` from this repo into the editor.
+4. Add a route: `barelybooting.com/*` triggers the Worker. The
+   Worker then fans out: `/api/*` and `/cerberus/*` hit the tunnel
+   via `tunnel.barelybooting.com`; everything else is proxied
+   through to GitHub Pages.
+
+Free tier ceiling: 100k requests/day. CERBERUS's DOS client keeps
+`UPLOAD_URL "http://barelybooting.com/api/v1/submit"` unchanged.
+
 ### 3. Enable Cloudflare's edge protections
 
 Cloudflare's tunnel by itself does not apply WAF or rate limiting. Turn
