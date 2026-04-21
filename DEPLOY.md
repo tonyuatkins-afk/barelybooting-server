@@ -281,6 +281,93 @@ Same drops apply to `cloudflared`. If you ever need to shell in for
 debugging, `docker compose exec` still works; these options restrict
 what a compromised process can do, not what the operator can do.
 
+## Threat model
+
+This is a small Flask app accepting public, anonymous uploads from
+DOS clients. The project deliberately runs on a co-tenant Home
+Assistant OS mini PC. Here is what's mitigated, what isn't, and why.
+
+### Mitigated
+
+- **Remote code execution blast radius.** The container is
+  non-root (UID 1000), `read_only: true` with `tmpfs: /tmp`,
+  `cap_drop: [ALL]`, `no-new-privileges`, and resource-capped
+  (memory 256 MB, CPU 0.5, PIDs 128). An RCE in Flask / Jinja /
+  waitress / SQLite inherits none of the capabilities it would
+  need to persist on disk, escalate, or exhaust the host.
+- **Unauthenticated abuse.** Per-client rate limit on the intake
+  endpoint (5/min + 30/hour keyed on `CF-Connecting-IP`). Payload
+  size ceiling (64 KB `MAX_CONTENT_LENGTH`, enforced by Werkzeug
+  before the parser runs). Strict input validation: ASCII-only
+  decode, content-type filter, hex-shape regex on signatures,
+  length caps on nickname/notes.
+- **Stored-XSS escalation.** CSP response header blocks scripts
+  entirely (`script-src 'none'`). `X-Frame-Options: DENY` blocks
+  clickjacking. Jinja autoescape covers user fields; no `|safe`.
+- **Supply-chain drift on images.** Python base pinned to
+  `python:3.12-slim-bookworm`, cloudflared pinned to a specific
+  release tag. Rebuild cadence documented above.
+- **Public-internet discovery of the host.** Cloudflare Tunnel is
+  outbound-only. The UDM Pro has no port forward, no DDNS, no
+  inbound rule. Host IP is not discoverable from the public
+  `barelybooting.com` hostname.
+
+### Residual risk: container-to-LAN egress
+
+A successful RCE inside the app container cannot write to disk,
+gain new capabilities, or exhaust host resources. But Docker's
+default NAT still lets the container's outbound network traffic
+reach both the internet and, via the host's route table, the
+10.69.69.0/24 LAN. An attacker could in principle scan the LAN,
+probe Home Assistant's API at `10.69.69.211:8123`, or reach out to
+the 486 at `10.69.69.160`.
+
+Docker's `internal: true` flag would block all egress and solve
+this, but `cloudflared` needs outbound connectivity to reach the
+Cloudflare edge. The clean fix is a dedicated egress-only
+namespace for `cloudflared` while the app container is pinned to
+an internal network, which is architecturally right but
+disproportionate for this project's size. The realistic
+mitigations that ARE in place (no-root + read-only FS + dropped
+caps + no shell in the image + no package manager at runtime)
+make RCE-to-LAN-pivot implausible without also escaping the
+container, which the other mitigations make hard.
+
+**Accepted.** If the calculus changes (e.g., the server ever
+stores credentials, or HA starts running things that matter more
+than home automation), revisit with a split-network topology.
+
+### Residual risk: plaintext transit from DOS clients
+
+Per the upload contract (`docs/ini-upload-contract.md` in the
+CERBERUS repo), v0.7.0 clients POST over HTTP, not HTTPS. Vintage
+DOS network stacks cannot negotiate modern TLS. Cloudflare's edge
+still terminates TLS for modern browser viewers; the unprotected
+segment is between the DOS client and Cloudflare's edge on the
+open internet.
+
+**Accepted** because the payload is explicitly public data (the
+whole purpose is to publish it on the browse UI) and there is no
+auth token in the request. An on-path attacker could replay or
+manipulate a POST, but replay only lands a duplicate submission
+(caught by the `run_signature` UNIQUE constraint, 409'd), and
+manipulation lands garbage that the input validation rejects.
+TLS for DOS clients is reserved for a future CERBERUS v0.8.0+
+via the NetISA card's hardware TLS path.
+
+### Out of scope
+
+- **DDoS beyond the edge.** Cloudflare's free plan absorbs
+  volumetric attacks; custom WAF rules (documented in "Enable
+  Cloudflare's edge protections" above) handle targeted floods.
+  Beyond that is a Cloudflare billing question, not a code one.
+- **Account / auth compromise.** The server has no accounts.
+  Anyone can submit. The HA host's own auth is a separate
+  question, managed in HA's user settings.
+- **Physical access to the HA mini PC.** If someone has physical
+  access, they own the volume, the `.env` file, and the tunnel
+  token. That is a perimeter concern, not an app concern.
+
 ## Rotating secrets
 
 - **Cloudflare Tunnel token:** delete the tunnel in the Zero Trust
