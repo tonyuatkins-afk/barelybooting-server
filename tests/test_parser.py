@@ -46,6 +46,43 @@ def test_upload_empty_nickname_becomes_none():
     assert p.nickname is None
 
 
+def test_run_signature_last_occurrence_wins():
+    """Contract emits the trailer last. If run_signature appears in
+    multiple places, the final occurrence is the authoritative value.
+    Protects against accidental multi-emission during layout drift and
+    against a benign earlier occurrence shadowing the real trailer."""
+    ini = (
+        "[cerberus]\n"
+        "version=0.7.0-rc2\n"
+        "schema_version=1.0\n"
+        "signature_schema=1\n"
+        "ini_format=1\n"
+        "mode=quick\n"
+        "runs=1\n"
+        "signature=a1b2c3d4\n"
+        "results=1\n"
+        "run_signature=deadbeefdeadbeef\n"  # not last, loses
+        "\n"
+        "[upload]\n"
+        "nickname=\n"
+        "run_signature=cafecafecafecafe\n"  # not last, loses
+        "\n"
+        "run_signature=00112233aabbccdd\n"  # trailer, last, wins
+    )
+    p = parse_ini_text(ini)
+    assert p.run_signature == "00112233aabbccdd"
+
+
+def test_signatures_normalized_to_lowercase():
+    ini = canonical_ini(
+        signature="A1B2C3D4",
+        run_signature="DEADBEEFCAFEF00D",
+    )
+    p = parse_ini_text(ini)
+    assert p.hardware_signature == "a1b2c3d4"
+    assert p.run_signature == "deadbeefcafef00d"
+
+
 def test_malformed_integer_returns_none():
     ini = canonical_ini().replace(
         "memory.write_kbps=15384", "memory.write_kbps=not_a_number"

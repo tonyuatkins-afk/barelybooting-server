@@ -87,11 +87,15 @@ CREATE INDEX IF NOT EXISTS idx_submissions_cpu_class
 def get_db() -> sqlite3.Connection:
     """Per-request connection, cached on Flask's ``g`` proxy."""
     if "db" not in g:
-        g.db = sqlite3.connect(current_app.config["DATABASE"])
+        g.db = sqlite3.connect(current_app.config["DATABASE"], timeout=15)
         g.db.row_factory = sqlite3.Row
         # Better write perf without sacrificing durability for our load.
         g.db.execute("PRAGMA journal_mode = WAL;")
         g.db.execute("PRAGMA foreign_keys = ON;")
+        # Backs up the connect-level timeout in case a caller reuses
+        # this connection for many statements: every statement waits
+        # up to 15s on a lock before raising OperationalError.
+        g.db.execute("PRAGMA busy_timeout = 15000;")
     return g.db
 
 
@@ -105,10 +109,11 @@ def close_db(_exc: BaseException | None = None) -> None:
 def standalone_db(path: str | Path):
     """Connection outside the Flask request context — used by CLI
     commands (init-db, seed) and tests that don't spin up an app."""
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA busy_timeout = 15000;")
     try:
         yield conn
         conn.commit()

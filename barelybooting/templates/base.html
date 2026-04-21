@@ -92,12 +92,12 @@
 <header class="site">
   <div class="wordmark">CERBERUS :: results browser</div>
   <nav>
-    <a href="/cerberus/">all</a>
-    <a href="/cerberus/cpu/486">486</a>
-    <a href="/cerberus/cpu/386">386</a>
-    <a href="/cerberus/cpu/286">286</a>
-    <a href="/cerberus/cpu/8088">8088</a>
-    <a href="/cerberus/unknown">unknown</a>
+    <a href="{{ url_for('browse.browse_index') }}">all</a>
+    <a href="{{ url_for('browse.browse_cpu', cpu_class='486') }}">486</a>
+    <a href="{{ url_for('browse.browse_cpu', cpu_class='386') }}">386</a>
+    <a href="{{ url_for('browse.browse_cpu', cpu_class='286') }}">286</a>
+    <a href="{{ url_for('browse.browse_cpu', cpu_class='8088') }}">8088</a>
+    <a href="{{ url_for('browse.browse_unknown') }}">unknown</a>
   </nav>
 </header>
 

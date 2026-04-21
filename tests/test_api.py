@@ -56,7 +56,7 @@ def test_submit_unsupported_ini_format_returns_400(client):
 
 
 def test_duplicate_run_signature_returns_409(client):
-    body = canonical_ini(run_signature="dedupetest000000")
+    body = canonical_ini(run_signature="deded0000000dede")
     first = client.post(
         "/api/v1/submit", data=body, content_type="text/plain"
     )
@@ -69,7 +69,7 @@ def test_duplicate_run_signature_returns_409(client):
 
 def test_submit_nickname_too_long_returns_400(client):
     body = canonical_ini(
-        run_signature="nicktest00000001", nickname="x" * 33
+        run_signature="abc100000000dead", nickname="x" * 33
     )
     resp = client.post(
         "/api/v1/submit", data=body, content_type="text/plain"
@@ -80,13 +80,77 @@ def test_submit_nickname_too_long_returns_400(client):
 
 def test_submit_notes_too_long_returns_400(client):
     body = canonical_ini(
-        run_signature="notetest00000001", notes="x" * 129
+        run_signature="abc200000000dead", notes="x" * 129
     )
     resp = client.post(
         "/api/v1/submit", data=body, content_type="text/plain"
     )
     assert resp.status_code == 400
     assert b"notes" in resp.data
+
+
+def test_submit_uppercase_signatures_normalize_to_lowercase(client):
+    """Contract says hex; client may emit either case. The parser must
+    lowercase on the way in so browse-route filtering (which lowercases
+    URL args) finds the same row. The raw INI is preserved verbatim in
+    the archive, so uppercase still appears inside the <pre> block;
+    what matters is the stored/queried identifier."""
+    body = canonical_ini(
+        signature="ABCDEF12",
+        run_signature="AAAAAAAABBBBCCCC",
+    )
+    resp = client.post(
+        "/api/v1/submit", data=body, content_type="text/plain"
+    )
+    assert resp.status_code == 200
+    # The machine-filter URL must find the submission under the
+    # lowercased key. If the parser skipped normalization, the detail
+    # page's "all runs from this machine" link would dead-end here.
+    machine = client.get("/cerberus/machine/abcdef12")
+    assert machine.status_code == 200
+    assert b"1 submission" in machine.data
+    # Sanity: the uppercase form should NOT resolve, because we store
+    # lowercase. (Browse routes also lowercase URL args, but passing a
+    # lowercase URL from an uppercase DB row would have been the silent
+    # break; this asserts the round-trip.)
+    uppercase = client.get("/cerberus/machine/ABCDEF12")
+    assert uppercase.status_code == 200
+    assert b"1 submission" in uppercase.data  # route-side lowercasing catches it too
+
+
+def test_submit_malformed_hardware_signature_returns_400(client):
+    body = canonical_ini(
+        signature="not-a-sig",
+        run_signature="aaaaaaaabbbbcccc",
+    )
+    resp = client.post(
+        "/api/v1/submit", data=body, content_type="text/plain"
+    )
+    assert resp.status_code == 400
+    assert b"hardware_signature" in resp.data
+
+
+def test_submit_malformed_run_signature_returns_400(client):
+    body = canonical_ini(
+        run_signature="thisisnotahexrun",  # 16 chars but not hex
+    )
+    resp = client.post(
+        "/api/v1/submit", data=body, content_type="text/plain"
+    )
+    assert resp.status_code == 400
+    assert b"run_signature" in resp.data
+
+
+def test_submit_accepts_40char_run_signature(client):
+    """The contract allows either 16-char prefix or 40-char full SHA-1
+    digest for run_signature. Ensure the 40-char form is accepted."""
+    body = canonical_ini(
+        run_signature="cafebabe" * 5,  # 40 hex chars
+    )
+    resp = client.post(
+        "/api/v1/submit", data=body, content_type="text/plain"
+    )
+    assert resp.status_code == 200
 
 
 def test_submit_non_ascii_body_returns_400(client):
@@ -123,7 +187,7 @@ def test_submit_at_max_content_length_succeeds(client):
     # parser accepts but ignores; the canonical INI provides the required
     # [cerberus] fields. Confirms the MAX_CONTENT_LENGTH=64*1024 ceiling
     # includes the boundary.
-    base = canonical_ini(run_signature="maxsize000000001")
+    base = canonical_ini(run_signature="aaaabbbb11112222")
     padding_needed = 64 * 1024 - len(base) - len("\n[pad]\npad=\n")
     pad_value = "x" * padding_needed
     body = base + "\n[pad]\npad=" + pad_value + "\n"
@@ -158,7 +222,7 @@ def test_submission_id_retries_on_collision(client, monkeypatch):
 
     first = client.post(
         "/api/v1/submit",
-        data=canonical_ini(run_signature="retry0000000001a"),
+        data=canonical_ini(run_signature="aaaa11110000aaaa"),
         content_type="text/plain",
     )
     assert first.status_code == 200
@@ -166,7 +230,7 @@ def test_submission_id_retries_on_collision(client, monkeypatch):
 
     second = client.post(
         "/api/v1/submit",
-        data=canonical_ini(run_signature="retry0000000002b"),
+        data=canonical_ini(run_signature="bbbb22220000bbbb"),
         content_type="text/plain",
     )
     assert second.status_code == 200

@@ -14,7 +14,7 @@
   <dt>Hardware signature</dt>
   <dd>
     {{ row.hardware_signature }}
-    <a href="/cerberus/machine/{{ row.hardware_signature }}">(all runs from this machine)</a>
+    <a href="{{ url_for('browse.browse_machine', hw_sig=row.hardware_signature) }}">(all runs from this machine)</a>
   </dd>
   <dt>Run signature</dt><dd>{{ row.run_signature }}</dd>
   {% if row.nickname %}<dt>Nickname</dt><dd>{{ row.nickname }}</dd>{% endif %}
@@ -27,7 +27,7 @@
   <dd>
     {{ row.cpu_detected or "-" }}
     {% if row.cpu_class %}
-      <a href="/cerberus/cpu/{{ row.cpu_class }}">({{ row.cpu_class }} class)</a>
+      <a href="{{ url_for('browse.browse_cpu', cpu_class=row.cpu_class) }}">({{ row.cpu_class }} class)</a>
     {% endif %}
   </dd>
   <dt>FPU</dt><dd>{{ row.fpu_detected or "-" }}</dd>

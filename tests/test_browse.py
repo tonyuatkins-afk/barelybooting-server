@@ -84,7 +84,7 @@ def test_pagination_page_past_end_clamps_to_last(client):
     # One submission means one page. ?page=999 should still render the
     # submission (clamped to page 1), not an empty "No submissions"
     # screen. Without the clamp, OFFSET=24950 would return zero rows.
-    sub_id = _submit(client, run_signature="pageclamp0000001")
+    sub_id = _submit(client, run_signature="a9ec1a1a0000abba")
     resp = client.get("/cerberus/?page=999")
     assert resp.status_code == 200
     assert b"1 submission" in resp.data

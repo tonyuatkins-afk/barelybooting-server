@@ -25,7 +25,9 @@ RATELIMIT_SUBMIT       BAREBOOT_      Rate-limit spec for POST /api/v1/submit.
 """
 
 import os
-from flask import Flask, request
+import sqlite3
+
+from flask import Flask, Response, request
 
 from . import db
 from .extensions import limiter
@@ -56,10 +58,11 @@ def _security_headers(resp):
 
 
 def _log_client_errors(resp):
-    """Leave a minimal audit trail for any 4xx/5xx. Enough to answer
-    'who's hammering me' after the fact without turning the log into
-    PII storage. We hash-prefix the client IP so logs remain useful
-    for clustering attackers without storing raw addresses indefinitely."""
+    """Leave a minimal audit trail for any 4xx/5xx. Logs the real client
+    IP (CF-Connecting-IP behind the tunnel; remote_addr as fallback),
+    the method, path, and a truncated User-Agent. Retention is whatever
+    the docker/host log rotation policy says; these logs are expected
+    to identify specific abusers, not to remain forever."""
     if resp.status_code >= 400 and request.path != "/api/v1/health":
         client_ip = (
             request.headers.get("CF-Connecting-IP")
@@ -74,6 +77,19 @@ def _log_client_errors(resp):
             client_ip, ua,
         )
     return resp
+
+
+def _db_busy_handler(e):
+    """OperationalError at the read path (browse routes, CLI-via-app)
+    lands here. The submit route has its own targeted catch that returns
+    a 503 with a friendlier body; this is the generic fallback."""
+    from flask import current_app
+    current_app.logger.warning("db busy at read path: %s", e)
+    return Response(
+        "error: database busy, retry shortly\n",
+        status=503,
+        mimetype="text/plain",
+    )
 
 
 def _validate_production_config(app: Flask) -> None:
@@ -122,6 +138,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     limiter.init_app(app)
     app.after_request(_security_headers)
     app.after_request(_log_client_errors)
+    app.register_error_handler(sqlite3.OperationalError, _db_busy_handler)
 
     app.register_blueprint(api.bp)
     app.register_blueprint(browse.bp)

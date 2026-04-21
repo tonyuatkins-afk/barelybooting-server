@@ -13,6 +13,7 @@ Kept deliberately minimal:
 
 from __future__ import annotations
 
+import re
 import secrets
 import sqlite3
 from flask import Blueprint, Response, current_app, jsonify, request
@@ -20,6 +21,14 @@ from flask import Blueprint, Response, current_app, jsonify, request
 from ..db import get_db
 from ..extensions import limiter
 from ..ini_parser import parse_ini_text
+
+
+# Contract shapes. Hardware signature is an 8-char SHA-1 prefix; run
+# signature is either the 16-char prefix (current emission) or the full
+# 40-char digest (legacy / future). Anything else is junk and gets 400'd
+# before it enters permanent storage where browse URLs would immortalize it.
+_HW_SIG_RE = re.compile(r"^[0-9a-f]{8}$")
+_RUN_SIG_RE = re.compile(r"^[0-9a-f]{16}$|^[0-9a-f]{40}$")
 
 
 bp = Blueprint("api", __name__, url_prefix="/api/v1")
@@ -101,6 +110,14 @@ def submit():
             400, f"unsupported ini_format={parsed.ini_format}"
         )
 
+    # Shape validation: identifiers MUST be hex. Normalization happened
+    # in the parser; here we enforce the format itself so garbage like
+    # "thisisnotasig" cannot immortalize itself as a browse URL.
+    if not _HW_SIG_RE.match(parsed.hardware_signature):
+        return _plain_error(400, "malformed hardware_signature (need 8 hex chars)")
+    if not _RUN_SIG_RE.match(parsed.run_signature):
+        return _plain_error(400, "malformed run_signature (need 16 or 40 hex chars)")
+
     # Length caps from the contract. Truncate silently would hide
     # client bugs; reject so the client's own INI and the server stay
     # in sync.
@@ -172,6 +189,13 @@ def _insert_with_retry(db, parsed):
             db.execute(_SUBMIT_SQL, values)
             db.commit()
             return submission_id, None
+        except sqlite3.OperationalError as e:
+            # "database is locked" or similar WAL-pressure condition.
+            # get_db() sets busy_timeout so these should be rare, but
+            # under a real flood we'd rather return a controlled 503
+            # than a 500 stack trace.
+            current_app.logger.warning("db busy on insert: %s", e)
+            return None, _plain_error(503, "database busy, retry shortly")
         except sqlite3.IntegrityError as e:
             msg = str(e).lower()
             if "run_signature" in msg:

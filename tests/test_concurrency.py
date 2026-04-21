@@ -80,7 +80,8 @@ def live_server():
 
 def _post_one(base_url: str, i: int) -> int:
     body = canonical_ini(
-        run_signature=f"c0ncurr{i:09d}",
+        # 16 hex chars: "cafe" prefix + 12-digit zero-padded index.
+        run_signature=f"cafe{i:012d}",
     ).encode("ascii")
     req = urllib.request.Request(
         f"{base_url}/api/v1/submit",
@@ -116,7 +117,8 @@ def test_concurrent_submissions_all_persist(live_server):
 
 def _post_one_returning_id(base_url: str, i: int):
     body = canonical_ini(
-        run_signature=f"c0ncurr{i:09d}",
+        # 16 hex chars: "cafe" prefix + 12-digit zero-padded index.
+        run_signature=f"cafe{i:012d}",
     ).encode("ascii")
     req = urllib.request.Request(
         f"{base_url}/api/v1/submit",

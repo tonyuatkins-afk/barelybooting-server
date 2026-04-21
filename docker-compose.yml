@@ -1,7 +1,7 @@
 services:
   barelybooting:
     build: .
-    image: barelybooting-server:0.1.1
+    image: barelybooting-server:0.1.2
     container_name: barelybooting
     restart: unless-stopped
     environment:

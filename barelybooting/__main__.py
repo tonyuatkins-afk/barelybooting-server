@@ -50,8 +50,11 @@ def cmd_seed(args: argparse.Namespace) -> int:
         return 2
 
     target = args.target.rstrip("/")
-    inis = sorted(p for p in source.rglob("*.INI")) + sorted(
-        p for p in source.rglob("*.ini")
+    # Case-insensitive suffix match. rglob("*.INI") + rglob("*.ini")
+    # misses .Ini, .iNi etc.; match on suffix.lower() instead.
+    inis = sorted(
+        p for p in source.rglob("*")
+        if p.is_file() and p.suffix.lower() == ".ini"
     )
     if not inis:
         print(f"no .INI files found under {source}")

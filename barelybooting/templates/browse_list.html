@@ -22,7 +22,7 @@
   <tbody>
     {% for r in rows %}
     <tr>
-      <td><a href="/cerberus/run/{{ r.id }}">{{ r.id }}</a></td>
+      <td><a href="{{ url_for('browse.run_detail', sub_id=r.id) }}">{{ r.id }}</a></td>
       <td>{{ r.received_at }}</td>
       <td>{{ r.cpu_detected or r.cpu_class or "-" }}</td>
       <td>{{ r.fpu_detected or "-" }}</td>
